@@ -1,0 +1,57 @@
+# The live site's publish workflow. Kept in mistevanescent/website as deploy/publish.yml and copied by hand into
+# the public repo `live` as .github/workflows/publish.yml, since no session can reach that repo (notes/plan.md,
+# "At launch").
+# It runs only when started by hand. The build checks out this repo's main with a read-only deploy key (the secret
+# SOURCE_DEPLOY_KEY in `live`) and can only read; the publish waits in the github-pages environment for approval.
+# `live` is public, so its run logs are too: they show the commit built and the build's output, nothing more.
+name: publish
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+# One publish at a time: a second run waits for the first instead of cancelling it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mistevanescent/website
+          ref: main
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          persist-credentials: false
+      # The commit this run publishes, so the next deploy can read main's commits since it.
+      - run: echo "Built from mistevanescent/website@$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - run: npm ci
+      # The build without the test pages under /lab/, with the location check before and after.
+      - run: npm run build:live
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
